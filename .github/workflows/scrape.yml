@@ -1,0 +1,36 @@
+name: Update RSS Feed
+
+on:
+  schedule:
+    # 8 AM and 2 PM UTC
+    - cron: '0 8,14 * * *'
+  workflow_dispatch: # Allows you to run it manually for testing
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install requests bs4 feedgen lxml
+
+      - name: Run scraper
+        run: python scraper.py
+
+      - name: Commit and push if changed
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add rss.xml
+          git commit -m "Update RSS feed" || exit 0
+          git push
