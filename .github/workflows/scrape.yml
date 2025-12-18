@@ -2,9 +2,8 @@ name: Update RSS Feed
 
 on:
   schedule:
-    # 8 AM and 2 PM UTC
-    - cron: '0 8,14 * * *'
-  workflow_dispatch: # Allows you to run it manually for testing
+    - cron: '0 13,19 * * *' # Adjusted to ~8AM and 2PM EST
+  workflow_dispatch:
 
 jobs:
   build:
@@ -13,7 +12,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -22,15 +21,16 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests bs4 feedgen lxml
+          pip install playwright feedgen
+          playwright install chromium
 
       - name: Run scraper
         run: python scraper.py
 
-      - name: Commit and push if changed
+      - name: Commit and push
         run: |
           git config --global user.name "GitHub Action"
           git config --global user.email "action@github.com"
           git add rss.xml
-          git commit -m "Update RSS feed" || exit 0
+          git commit -m "Update RSS: $(date)" || exit 0
           git push
