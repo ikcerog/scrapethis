@@ -1,65 +1,70 @@
-import os
 import datetime
 from playwright.sync_api import sync_playwright
 from feedgen.feed import FeedGenerator
 
-URL = "https://www.uwm.com/press-releases"
+URL = "https://finance.yahoo.com/quote/UWMC/press-releases/"
 OUTPUT_FILE = "rss.xml"
 
-def scrape_uwm():
+def scrape_uwmc_stream():
     with sync_playwright() as p:
-        # Launch browser
+        # Use a real User-Agent to prevent immediate blocking
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = context.new_page()
         
-        # Navigate and wait for the grid items to appear
-        print(f"Loading {URL}...")
+        print(f"Navigating to {URL}...")
         page.goto(URL, wait_until="networkidle")
+
+        # 1. Handle Cookie Consent (if it appears)
+        try:
+            # Look for "Accept all" or "Agree" buttons
+            page.click('button[name="agree"]', timeout=5000)
+            print("Accepted cookie consent.")
+        except:
+            pass
+
+        # 2. Wait for the stream list to load
+        page.wait_for_selector("ul.stream-items", timeout=15000)
         
-        # Wait specifically for the MUI Grid items (adjusting for the 10 item requirement)
-        # We target the 'a' tags that likely lead to the full articles
-        page.wait_for_selector(".MuiGrid-item", timeout=10000)
-        
-        # Grab the items
-        items = page.locator(".MuiGrid-item").all()
-        print(f"Found {len(items)} potential items.")
+        # 3. Target stream items that are stories (skipping ads)
+        # We look for li.stream-item that ALSO have the story-item class
+        items = page.locator("li.stream-item.story-item").all()
+        print(f"Found {len(items)} story items.")
 
         fg = FeedGenerator()
         fg.id(URL)
-        fg.title('UWM Press Releases')
+        fg.title('UWMC Press Releases (Yahoo Stream)')
         fg.link(href=URL, rel='alternate')
-        fg.description('Latest press releases from UWM')
+        fg.description('Live RSS feed of UWMC news items from the Yahoo Finance stream.')
         fg.language('en')
 
         count = 0
         for item in items:
-            if count >= 10: break # Limit to top 10
+            if count >= 10: break
             
-            # Extract Title and Link
-            # MUI usually nests the text inside Typography/h tags and the link in an <a>
-            link_element = item.locator("a").first
-            title_element = item.locator("h2, h3, h4, p").first
-            
-            if link_element.count() > 0:
-                title = title_element.inner_text().strip() if title_element.count() > 0 else "No Title"
-                href = link_element.get_attribute("href")
+            # Extract link and title from the first <a> tag
+            link_el = item.locator("a").first
+            if link_el.count() > 0:
+                title = link_el.inner_text().strip()
+                href = link_el.get_attribute("href")
                 
-                # Filter out navigation/footer links that might share the class
-                if not href or "press-release" not in href.lower():
-                    continue
+                if not href or href.startswith("#"): continue
+                full_url = f"https://finance.yahoo.com{href}" if href.startswith("/") else href
 
-                full_url = f"https://www.uwm.com{href}" if href.startswith("/") else href
-                
                 fe = fg.add_entry()
                 fe.id(full_url)
                 fe.title(title)
                 fe.link(href=full_url)
                 fe.pubDate(datetime.datetime.now(datetime.timezone.utc))
+                
+                print(f"Scraped: {title[:50]}...")
                 count += 1
-                print(f"Added: {title}")
 
         fg.rss_file(OUTPUT_FILE)
+        print(f"Done! Saved {count} items to {OUTPUT_FILE}.")
         browser.close()
 
 if __name__ == "__main__":
-    scrape_uwm()
+    scrape_uwmc_stream()
