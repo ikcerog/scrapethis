@@ -2,7 +2,7 @@ name: Update RSS Feed
 
 on:
   schedule:
-    - cron: '0 8,14 * * *'
+    - cron: '0 13,19 * * *'
   workflow_dispatch: # Allows manual run for testing
 
 jobs:
