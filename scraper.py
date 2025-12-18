@@ -1,44 +1,65 @@
-import requests
-from bs4 import BeautifulSoup
-from feedgen.feed import FeedGenerator
+import os
 import datetime
+from playwright.sync_api import sync_playwright
+from feedgen.feed import FeedGenerator
 
 URL = "https://www.uwm.com/press-releases"
 OUTPUT_FILE = "rss.xml"
 
 def scrape_uwm():
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-    response = requests.get(URL, headers=headers)
-    soup = BeautifulSoup(response.content, 'html.parser')
-
-    # Find the press release items
-    # Note: .MuiGrid-root is common; we look for the specific containers within the main section
-    articles = soup.select('.MuiGrid-root.MuiGrid-item')
-
-    fg = FeedGenerator()
-    fg.id(URL)
-    fg.title('UWM Press Releases')
-    fg.link(href=URL, rel='alternate')
-    fg.description('Latest press releases from UWM')
-    fg.language('en')
-
-    for article in articles:
-        # Looking for titles and links inside the grid item
-        link_tag = article.find('a')
-        title_tag = article.find(['h2', 'h3', 'h4', 'p']) # MUI often uses different tags for headings
+    with sync_playwright() as p:
+        # Launch browser
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
         
-        if link_tag and title_tag:
-            title = title_tag.get_text(strip=True)
-            link = "https://www.uwm.com" + link_tag['href'] if link_tag['href'].startswith('/') else link_tag['href']
-            
-            fe = fg.add_entry()
-            fe.id(link)
-            fe.title(title)
-            fe.link(href=link)
-            # UWM releases usually have a date, you can try to parse it here if needed
-            fe.pubDate(datetime.datetime.now(datetime.timezone.utc))
+        # Navigate and wait for the grid items to appear
+        print(f"Loading {URL}...")
+        page.goto(URL, wait_until="networkidle")
+        
+        # Wait specifically for the MUI Grid items (adjusting for the 10 item requirement)
+        # We target the 'a' tags that likely lead to the full articles
+        page.wait_for_selector(".MuiGrid-item", timeout=10000)
+        
+        # Grab the items
+        items = page.locator(".MuiGrid-item").all()
+        print(f"Found {len(items)} potential items.")
 
-    fg.rss_file(OUTPUT_FILE)
+        fg = FeedGenerator()
+        fg.id(URL)
+        fg.title('UWM Press Releases')
+        fg.link(href=URL, rel='alternate')
+        fg.description('Latest press releases from UWM')
+        fg.language('en')
+
+        count = 0
+        for item in items:
+            if count >= 10: break # Limit to top 10
+            
+            # Extract Title and Link
+            # MUI usually nests the text inside Typography/h tags and the link in an <a>
+            link_element = item.locator("a").first
+            title_element = item.locator("h2, h3, h4, p").first
+            
+            if link_element.count() > 0:
+                title = title_element.inner_text().strip() if title_element.count() > 0 else "No Title"
+                href = link_element.get_attribute("href")
+                
+                # Filter out navigation/footer links that might share the class
+                if not href or "press-release" not in href.lower():
+                    continue
+
+                full_url = f"https://www.uwm.com{href}" if href.startswith("/") else href
+                
+                fe = fg.add_entry()
+                fe.id(full_url)
+                fe.title(title)
+                fe.link(href=full_url)
+                fe.pubDate(datetime.datetime.now(datetime.timezone.utc))
+                count += 1
+                print(f"Added: {title}")
+
+        fg.rss_file(OUTPUT_FILE)
+        browser.close()
 
 if __name__ == "__main__":
     scrape_uwm()
